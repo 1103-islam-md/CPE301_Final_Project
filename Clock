@@ -1,0 +1,48 @@
+#include <Wire.h> // time by paul stoffregen / ds1307rtc 
+#include <TimeLib.h>      // Sometimes called <Time.h> in older examples
+#include <DS1307RTC.h>    // DS1307 bridge for the Time library
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial) {
+    ; // wait for Serial on boards like Leonardo/Micro/Teensy
+  }
+
+  // Tell the Time library to get its time from the DS1307
+  setSyncProvider(RTC.get);   // function in DS1307RTC that returns time_t
+
+  if (timeStatus() != timeSet) {
+    Serial.println("Unable to sync with the RTC");
+  } else {
+    Serial.println("RTC has set the system time");
+  }
+}
+
+void loop() {
+  // Print time once per second
+  digitalClockDisplay();
+  delay(1000);
+}
+
+void digitalClockDisplay() {
+  // Format: HH:MM:SS DD/MM/YYYY
+  Serial.print(hour());
+  printDigits(minute());
+  printDigits(second());
+  Serial.print("  ");
+  Serial.print(day());
+  Serial.print("/");
+  Serial.print(month());
+  Serial.print("/");
+  Serial.print(year());
+  Serial.println();
+}
+
+void printDigits(int digits) {
+  // helper to print : and leading zero
+  Serial.print(":");
+  if (digits < 10) {
+    Serial.print('0');
+  }
+  Serial.print(digits);
+}
