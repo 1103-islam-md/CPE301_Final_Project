@@ -1,0 +1,325 @@
+// CPE 301 Final Project Justyce Hickman Md Islam
+// Things to do, implement RTC module that describes everytime we change vent position, or switch states, or fan turns on or off
+// Utilize rag or cardboard box to make water cooler look like a water cooler
+// Library Imports
+#include <LiquidCrystal.h>
+#include <DHT11.h>
+#include <Stepper.h>
+// Pin Info
+// Water sensor on Analog Pin 0
+// Temp sensor / humidity sensor on digital pin 13
+// LCD pins 12 - 11 - 5 - 4 - 3 - 2
+// Stepper pins 23 - 27 - 25 - 29
+// Pin 46 motor fan turn off and on
+// Pin 48 move motor left
+// Pin 50 move motor right
+// Pin 53 red led
+// Pin 51 yellow led
+// Pin 49 green led
+// Pin 47 blue led
+// Pin 19 start button
+// Pin 43 disable button
+// Pin 45 reset button
+
+
+// Macro Keys
+
+#define DHT11PIN 13
+#define WATERSENSORPIN 0
+
+// Variables for Water sensor bit code
+#define RDA 0x80
+#define TBE 0x20
+
+// Define temp sensor, lcd, stepper
+
+DHT11 dht11(DHT11PIN);
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+Stepper stepperMotor(2048, 23, 27, 25, 29);
+
+// Define variable for checking if we displayed LCD temp and humidity
+bool tempNotDisplayed = false;
+unsigned long lastUpdateTime = 0;
+unsigned long minute = 60000;
+
+
+volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
+volatile unsigned char *myUCSR0B = (unsigned char *)0x00C1;
+volatile unsigned char *myUCSR0C = (unsigned char *)0x00C2;
+volatile unsigned int  *myUBRR0  = (unsigned int *) 0x00C4;
+volatile unsigned char *myUDR0   = (unsigned char *)0x00C6;
+ 
+volatile unsigned char* my_ADMUX = (unsigned char*) 0x7C;
+volatile unsigned char* my_ADCSRB = (unsigned char*) 0x7B;
+volatile unsigned char* my_ADCSRA = (unsigned char*) 0x7A;
+volatile unsigned int* my_ADC_DATA = (unsigned int*) 0x78;
+
+unsigned char* ddr_b = (unsigned char*) 0x24;
+unsigned char* port_b = (unsigned char*) 0x25;
+unsigned char* pin_b = (unsigned char*) 0x23;
+unsigned char* ddr_h = (unsigned char*) 0x101;
+unsigned char* port_h = (unsigned char*) 0x102;
+unsigned char* ddr_l  = (unsigned char*) 0x10A;
+unsigned char* port_l = (unsigned char*) 0x10B;
+unsigned char* pin_l  = (unsigned char*) 0x109;
+unsigned char* ddr_d = (unsigned char*) 0x2A;
+unsigned char* port_d = (unsigned char*) 0x2B;
+unsigned char* pin_d  = (unsigned char*) 0x29;
+
+
+
+
+
+typedef enum {
+  DISABLED,
+  IDLE,
+  RUNNING,
+  ERROR
+} SystemState;
+
+SystemState state = DISABLED;
+
+void setup() {
+  // Serial rate at 9600
+  U0init(9600);
+  // Function to setup water reader
+  adc_init();
+  // Setup lcd
+  lcd.begin(16,2);
+  // Set up stepper motor
+  stepperMotor.setSpeed(10);
+  // Set up two buttons to control motor
+  // Pin 48 move step motor left PL1
+  *ddr_l &= ~(1 << PL1);
+  *port_l |= (1 << PL1);
+  // Pin 50 move step motor right PB3
+  *ddr_b &= ~(1 << PB3);
+  *port_b |= (1 << PB3);
+  // Set up led pins
+  // Red led pin 53 PB0
+  *ddr_b |= (1 << PB0);
+  // Yellow led pin 51 PB2
+  *ddr_b |= (1 << PB2);
+  // Green led pin 49 PL0
+  *ddr_l |= (1 << PL0);
+  // Blue led pin 47 PL2
+  *ddr_l |= (1 << PL2);
+  // Set up disable button
+  *ddr_l &= ~(1 << PL6);
+  *port_l |= (1 << PL6);
+  // Set up reset button
+  *ddr_l &= ~(1 << PL4);
+  *port_l |= (1 << PL4);
+  // Set up start button ISR
+  attachInterrupt(digitalPinToInterrupt(19), startCooler, FALLING);
+}
+
+void loop() {
+  if(!(*pin_l & (1 << PL1))){
+    stepperMotor.step(-150);
+  }
+  if(!(*pin_b & (1 << PB3))){
+    stepperMotor.step(150);
+  }
+  if(!(*pin_l & (1 << PL6))){
+    Serial.print("Set state to disabled");
+    state = DISABLED;
+  }
+  unsigned int waterValue = adc_read(WATERSENSORPIN);
+  unsigned int waterThreshold = 200;
+  unsigned int tempThreshold = 20;
+  bool waterLevelLow = true;
+
+  int temperature = 0;
+  int humidity = 0;
+  int result = dht11.readTemperatureHumidity(temperature, humidity);
+  lcd.setCursor(0, 0);
+
+    if(!(*pin_l & (1 << PL4)) && state == ERROR){
+    state = IDLE;
+      lcd.clear();
+      lcd.print("Temperature: ");
+      lcd.print(temperature);
+      lcd.print("C");
+      lcd.setCursor(0, 1);
+      lcd.print("Humidity: ");
+      lcd.print(humidity);
+      lcd.print("%");
+      printMessage("Set state to IDLE");
+  }
+
+  if(waterValue < waterThreshold) {
+    lcd.clear();
+    lcd.print("Water level low!");
+    waterLevelLow = true;
+  }
+  else {
+    waterLevelLow = false;
+  }
+
+  if((state == IDLE || state == RUNNING) && !waterLevelLow && result == 0){
+    if(tempNotDisplayed || millis() - lastUpdateTime >= minute){
+      lastUpdateTime = millis();
+      tempNotDisplayed = false;
+
+      lcd.clear();
+      lcd.print("Temperature: ");
+      lcd.print(temperature);
+      lcd.print("C");
+      lcd.setCursor(0, 1);
+      lcd.print("Humidity: ");
+      lcd.print(humidity);
+      lcd.print("%");
+    }
+  }
+
+  switch(state) {
+    case DISABLED:
+    {
+      *port_b |= (1 << PB2);
+      *port_l &= ~(1 << PL0);
+      *port_l &= ~(1 << PL2);
+      *port_b &= ~(1 << PB0);
+      analogWrite(46, 0);
+      lcd.clear();
+    }
+    break;
+    case IDLE:
+    {
+      *port_l |= (1 << PL0);
+      *port_b &= ~(1 << PB2);
+      *port_l &= ~(1 << PL2);
+      *port_b &= ~(1 << PB0);
+      analogWrite(46, 0);
+      if(waterValue < waterThreshold){
+        printMessage("Error, water level low! Set State to ERROR");
+        state = ERROR;
+      }
+      else if(temperature > tempThreshold){
+        printMessage("Temp > Temp Threshold, Set State to RUNNING");
+        state = RUNNING;
+      }
+
+    }
+    break;
+    case RUNNING:
+    {
+      *port_l |= (1 << PL2);
+      *port_b &= ~(1 << PB2);
+      *port_l &= ~(1 << PL0);
+      *port_b &= ~(1 << PB0);
+      analogWrite(46, 255);
+      if(temperature <= tempThreshold){
+        printMessage("Temperature cooled to limit, Set State to IDLE");
+        state = IDLE;
+      }
+      else if(waterValue < waterThreshold){
+        printMessage("Error! Water level low, Set state to ERROR");
+        state = ERROR;
+      }
+    }
+    break;
+    case ERROR:
+    {
+      *port_b |= (1 << PB0);
+      *port_b &= ~(1 << PB2);
+      *port_l &= ~(1 << PL0);
+      *port_l &= ~(1 << PL2);
+      analogWrite(46, 0);
+    }
+    break;
+  }
+}
+
+void printMessage(char msg[]){
+  for(int i = 0; msg[i] != '\0'; i++){
+    U0putchar(msg[i]);
+}
+  U0putchar('\n');
+
+}
+void startCooler(){
+  if(state != DISABLED){
+
+  }
+  else{
+  state = IDLE;
+  printMessage("Set State to Idle");
+  lastUpdateTime = 0;
+  tempNotDisplayed = true;
+  }
+}
+
+void adc_init() //write your code after each commented line and follow the instruction 
+{
+  // setup the A register
+ // set bit 7 to 1 to enable the ADC 
+  *my_ADCSRA |= (1 << 7);
+ // clear bit 5 to 0 to disable the ADC trigger mode
+  *my_ADCSRA &= ~(1 << 5);
+ // clear bit 3 to 0 to disable the ADC interrupt 
+  *my_ADCSRA &= ~(1 << 3);
+ // clear bit 0-2 to 0 to set prescaler selection to slow reading
+  *my_ADCSRA &= ~0x07;
+  *my_ADCSRA |= 0x07;
+  // setup the B register
+// clear bit 3 to 0 to reset the channel and gain bits
+  *my_ADCSRB &= ~(1 << 3);
+ // clear bit 2-0 to 0 to set free running mode
+  *my_ADCSRB &= ~0x07;
+  // setup the MUX Register
+ // clear bit 7 to 0 for AVCC analog reference
+  *my_ADMUX &= ~(1 << 7);
+// set bit 6 to 1 for AVCC analog reference
+  *my_ADMUX |= (1 << 6);
+  // clear bit 5 to 0 for right adjust result
+  *my_ADMUX &= ~(1 << 5);
+ // clear bit 4-0 to 0 to reset the channel and gain bits
+  *my_ADMUX &= 0xE0;
+}
+unsigned int adc_read(unsigned char adc_channel_num) //work with channel 0
+{
+  // clear the channel selection bits (MUX 4:0)
+  *my_ADMUX &= 0xE0;
+
+  // clear the channel selection bits (MUX 5) hint: it's not in the ADMUX register
+  *my_ADCSRB &= ~(1 << 3);
+ 
+  // set the channel selection bits for channel 0
+  *my_ADMUX |= (adc_channel_num & 0x1F);
+
+  // set bit 6 of ADCSRA to 1 to start a conversion
+  *my_ADCSRA |= (1 << 6);
+  // wait for the conversion to complete
+  while((*my_ADCSRA & 0x40) != 0);
+  // return the result in the ADC data register and format the data based on right justification (check the lecture slide)
+
+  *my_ADCSRA |= (1 << 4);   // write 1 to clear ADIF
+  unsigned int val = *my_ADC_DATA;
+  return val;
+}
+
+void U0init(int U0baud)
+{
+ unsigned long FCPU = 16000000;
+ unsigned int tbaud;
+ tbaud = (FCPU / 16 / U0baud - 1);
+ // Same as (FCPU / (16 * U0baud)) - 1;
+ *myUCSR0A = 0x20;
+ *myUCSR0B = 0x18;
+ *myUCSR0C = 0x06;
+ *myUBRR0  = tbaud;
+}
+unsigned char U0kbhit()
+{
+  return *myUCSR0A & RDA;
+}
+unsigned char U0getchar()
+{
+  return *myUDR0;
+}
+void U0putchar(unsigned char U0pdata)
+{
+  while((*myUCSR0A & TBE)==0);
+  *myUDR0 = U0pdata;
+}
