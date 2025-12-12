@@ -91,7 +91,7 @@ void setup() {
   // Setup lcd
   lcd.begin(16,2);
 
-    Wire.begin();
+  Wire.begin();
 
   setSyncProvider(RTC.get);
   // Set up stepper motor
@@ -245,14 +245,6 @@ void loop() {
   }
 }
 
-/*void printMessage(char msg[]){
-  for(int i = 0; msg[i] != '\0'; i++){
-    U0putchar(msg[i]);
-}
-  U0putchar('\n');
-
-}*/
-//updated rtc 
 void printMessage(char msg[]) {
   String t = getTimestamp(); 
   for (int i = 0; i < t.length(); i++) {
