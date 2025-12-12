@@ -129,10 +129,10 @@ String getTimestamp(){
   return String(buffer);
 }
 void loop() {
-  if(!(*pin_l & (1 << PL1))){
+  if(!(*pin_l & (1 << PL1)) && state != DISABLED){
     stepperMotor.step(-150);
   }
-  if(!(*pin_b & (1 << PB3))){
+  if(!(*pin_b & (1 << PB3)) && state != DISABLED){
     stepperMotor.step(150);
   }
   if(!(*pin_l & (1 << PL6))){
