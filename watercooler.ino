@@ -1,10 +1,11 @@
 // CPE 301 Final Project Justyce Hickman Md Islam
-// Things to do, implement RTC module that describes everytime we change vent position, or switch states, or fan turns on or off
-// Utilize rag or cardboard box to make water cooler look like a water cooler
 // Library Imports
 #include <LiquidCrystal.h>
 #include <DHT11.h>
 #include <Stepper.h>
+#include <Wire.h>
+#include <DS1307RTC.h>
+#include <Time.h>
 // Pin Info
 // Water sensor on Analog Pin 0
 // Temp sensor / humidity sensor on digital pin 13
@@ -20,6 +21,9 @@
 // Pin 19 start button
 // Pin 43 disable button
 // Pin 45 reset button
+// Pin 20 - SDA pin 
+// Pin 21 - SCL pin
+
 
 
 // Macro Keys
@@ -40,7 +44,7 @@ Stepper stepperMotor(2048, 23, 27, 25, 29);
 // Define variable for checking if we displayed LCD temp and humidity
 bool tempNotDisplayed = false;
 unsigned long lastUpdateTime = 0;
-unsigned long minute = 60000;
+unsigned long minuteMS = 60000;
 
 
 volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
@@ -86,6 +90,10 @@ void setup() {
   adc_init();
   // Setup lcd
   lcd.begin(16,2);
+
+    Wire.begin();
+
+  setSyncProvider(RTC.get);
   // Set up stepper motor
   stepperMotor.setSpeed(10);
   // Set up two buttons to control motor
@@ -111,9 +119,15 @@ void setup() {
   *ddr_l &= ~(1 << PL4);
   *port_l |= (1 << PL4);
   // Set up start button ISR
+  *ddr_d &= ~(1 << PD2); 
+  *port_d |= (1 << PD2);
   attachInterrupt(digitalPinToInterrupt(19), startCooler, FALLING);
 }
-
+String getTimestamp(){
+  char buffer[12];
+  sprintf(buffer, "%02d:%02d:%02d", hour(), minute(), second());
+  return String(buffer);
+}
 void loop() {
   if(!(*pin_l & (1 << PL1))){
     stepperMotor.step(-150);
@@ -122,12 +136,12 @@ void loop() {
     stepperMotor.step(150);
   }
   if(!(*pin_l & (1 << PL6))){
-    Serial.print("Set state to disabled");
+    printMessage("State disabled");
     state = DISABLED;
   }
   unsigned int waterValue = adc_read(WATERSENSORPIN);
   unsigned int waterThreshold = 200;
-  unsigned int tempThreshold = 20;
+  unsigned int tempThreshold = 17;
   bool waterLevelLow = true;
 
   int temperature = 0;
@@ -158,7 +172,7 @@ void loop() {
   }
 
   if((state == IDLE || state == RUNNING) && !waterLevelLow && result == 0){
-    if(tempNotDisplayed || millis() - lastUpdateTime >= minute){
+    if(tempNotDisplayed || millis() - lastUpdateTime >= minuteMS){
       lastUpdateTime = millis();
       tempNotDisplayed = false;
 
@@ -231,13 +245,28 @@ void loop() {
   }
 }
 
-void printMessage(char msg[]){
+/*void printMessage(char msg[]){
   for(int i = 0; msg[i] != '\0'; i++){
     U0putchar(msg[i]);
 }
   U0putchar('\n');
 
+}*/
+//updated rtc 
+void printMessage(char msg[]) {
+  String t = getTimestamp(); 
+  for (int i = 0; i < t.length(); i++) {
+    U0putchar(t[i]);
+  }
+  U0putchar(' ');
+  U0putchar('|');
+  U0putchar(' ');
+  for (int i = 0; msg[i] != '\0'; i++) {
+    U0putchar(msg[i]);
+  }
+  U0putchar('\n');
 }
+
 void startCooler(){
   if(state != DISABLED){
 
